@@ -1,5 +1,3 @@
-"use client";
-
 import React, { useState, useMemo, useEffect } from "react";
 import {
   Lock, ShieldCheck, Users, FolderKanban, Plus, Ban, CheckCircle2,
@@ -271,6 +269,7 @@ export default function PlanStar() {
   const [tickets, setTickets] = useState(seedTickets);
   const [accessRequests, setAccessRequests] = useState(seedRequests); // GC hozzáférés-kérések
   const [session, setSession] = useState(null);   // bejelentkezett user
+  const [screen, setScreen] = useState("home");    // belépés előtti nézet: "home" | "login" | "landing"
 
   // login form
   const [code, setCode] = useState("");
@@ -291,7 +290,13 @@ export default function PlanStar() {
   const logout = () => setSession(null);
 
   if (!session) {
-    return <LoginScreen {...{ code, setCode, pin, setPin, showPin, setShowPin, error, handleLogin }} />;
+    if (screen === "home") {
+      return <HomeScreen onClient={() => setScreen("login")} onProspect={() => setScreen("landing")} />;
+    }
+    if (screen === "landing") {
+      return <LandingPage onBack={() => setScreen("home")} onLogin={() => setScreen("login")} />;
+    }
+    return <LoginScreen {...{ code, setCode, pin, setPin, showPin, setShowPin, error, handleLogin, onBack: () => setScreen("home") }} />;
   }
   if (session.role === ROLE.ADMIN) {
     return <AdminConsole {...{ session, logout, users, setUsers, projects, setProjects, accessRequests, setAccessRequests }} />;
@@ -299,12 +304,50 @@ export default function PlanStar() {
   return <ProjectView {...{ session, logout, tickets, setTickets, projects, users, accessRequests, setAccessRequests }} />;
 }
 
+/* ───────────────────────── 0) KEZDŐKÉPERNYŐ ─────────────────────── */
+function HomeScreen({ onClient, onProspect }) {
+  return (
+    <div style={S.loginWrap}>
+      <div style={S.grid} />
+      <div style={{ position: "relative", width: "100%", maxWidth: 460, textAlign: "center" }}>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
+          <div style={S.logoMark}><MapPin size={26} color="#0a0e14" /></div>
+          <div style={{ textAlign: "left" }}>
+            <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-.5px" }}>
+              Plan<span style={{ color: "#e6b450" }}>Star</span>
+            </div>
+            <div style={{ fontSize: 11, color: "#5a6472", letterSpacing: "2px", textTransform: "uppercase" }}>
+              Helyszíni hibakezelés
+            </div>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 15, color: "#8893a3", lineHeight: 1.6, margin: "8px auto 32px", maxWidth: 380 }}>
+          Alaprajz-alapú projektkövetés és hibakezelés generálkivitelezőknek és szakágaknak.
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <button onClick={onClient} style={S.homeBtnPrimary}>
+            <ShieldCheck size={18} /> Már ügyfél vagyok
+          </button>
+          <button onClick={onProspect} style={S.homeBtnSecondary}>
+            <Building2 size={18} /> Érdeklődöm / ügyfél szeretnék lenni
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ───────────────────────── 1) BELÉPÉSI KÉPERNYŐ ─────────────────── */
-function LoginScreen({ code, setCode, pin, setPin, showPin, setShowPin, error, handleLogin }) {
+function LoginScreen({ code, setCode, pin, setPin, showPin, setShowPin, error, handleLogin, onBack }) {
   return (
     <div style={S.loginWrap}>
       <div style={S.grid} />
       <div style={S.loginCard}>
+        {onBack && (
+          <button onClick={onBack} style={S.backLink}>← Vissza</button>
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
           <div style={S.logoMark}><MapPin size={22} color="#0a0e14" /></div>
           <div>
@@ -369,6 +412,179 @@ function LoginScreen({ code, setCode, pin, setPin, showPin, setShowPin, error, h
     </div>
   );
 }
+
+/* ───────────────────────── 1b) LANDING (érdeklődőknek) ──────────── */
+function LandingPage({ onBack, onLogin }) {
+  const [form, setForm] = useState({ company: "", contact: "", phone: "", email: "", message: "" });
+  const [sent, setSent] = useState(false);
+  const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const submit = () => {
+    if (!form.company.trim() || !(form.phone.trim() || form.email.trim())) return;
+    // Bemutató mód: élesben ez emailt küld az adminnak.
+    setSent(true);
+  };
+
+  const steps = [
+    { n: 1, t: "Projekt indul", d: "A generálkivitelező elindít egy projektet, és feltölti hozzá az alaprajzot." },
+    { n: 2, t: "Szakmák meghívása", d: "Meghívja a szükséges alvállalkozókat (villanyszerelő, nyílászárós, burkoló…), akik saját kóddal lépnek be." },
+    { n: 3, t: "Hibák jelölése", d: "A hibákat tűpontosan az alaprajzra jelölik, fotóval és leírással. Mindenki csak a saját feladatát látja." },
+    { n: 4, t: "Követés és lezárás", d: "A státuszok (nyitott → folyamatban → javítva → lezárva) végigkövethetők, a kommunikáció a hibához kötve marad." },
+  ];
+  const benefits = [
+    ["Minden a helyén", "A hiba ott van az alaprajzon, ahol a valóságban is. Nincs többé „melyik ablakról is volt szó?”."],
+    ["Szakmánkénti rend", "Minden szakma csak a rá tartozó feladatokat látja. Nincs káosz, nincs más dolgába látás."],
+    ["Helyszíni fotó", "A szakember a telefonjával rögtön a hibához fűzi a képet."],
+    ["Átlátható felelősség", "Ki, mikor, mit írt — minden bejegyzés nyomon követhető."],
+    ["Egy gombnyomásra hívható", "A bejegyzésnél rögtön felhívható a felelős szakma vagy az építésvezető."],
+    ["Profi dokumentáció", "A teljes hibalista bármikor letölthető PDF-ben, szakmánként rendezve."],
+  ];
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#0a0e14", color: "#e8edf4", fontFamily: sans }}>
+      {/* Fejléc-sáv */}
+      <div style={S.landingNav}>
+        <button onClick={onBack} style={S.backLink2}>← Főoldal</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <div style={S.logoMarkSm}><MapPin size={16} color="#0a0e14" /></div>
+          <span style={{ fontWeight: 800, fontSize: 16 }}>Plan<span style={{ color: "#e6b450" }}>Star</span></span>
+        </div>
+        <button onClick={onLogin} style={S.navLoginBtn}>Belépés</button>
+      </div>
+
+      <div style={{ maxWidth: 760, margin: "0 auto", padding: "0 20px 60px" }}>
+        {/* Hero */}
+        <div style={{ textAlign: "center", padding: "56px 0 40px" }}>
+          <h1 style={{ fontSize: 34, fontWeight: 800, lineHeight: 1.2, margin: "0 0 16px", letterSpacing: "-.5px" }}>
+            A hibakezelés, ahol minden a helyén van
+          </h1>
+          <p style={{ fontSize: 16.5, color: "#8893a3", lineHeight: 1.6, maxWidth: 560, margin: "0 auto" }}>
+            Alaprajz-alapú projektkövetés generálkivitelezőknek és szakágaknak. A helyszíni hibák, a kommunikáció és a felelősség egy helyen, az alaprajzra vetítve.
+          </p>
+        </div>
+
+        {/* Mi ez? + Kinek? */}
+        <Section title="Mi ez a PlanStar?">
+          <p style={S.lpText}>
+            A PlanStar egy építési projektmenedzsment és hibakezelő rendszer, amely az építkezés valódi alaprajzára helyezi a hibajegyeket. Ahelyett, hogy a hibák elvesznének telefonhívásokban, üzenetekben és fejekben, minden bejegyzés ott van, ahol a probléma — egy pötty az alaprajzon, fotóval, felelőssel és státusszal.
+          </p>
+        </Section>
+
+        <Section title="Kinek készült?">
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {["Társasház-építők", "Családi házas kivitelezők", "Generálkivitelező cégek"].map(x => (
+              <span key={x} style={S.audienceChip}>{x}</span>
+            ))}
+          </div>
+        </Section>
+
+        {/* Hogyan működik */}
+        <Section title="Hogyan működik?">
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {steps.map(s => (
+              <div key={s.n} style={S.stepRow}>
+                <div style={S.stepNum}>{s.n}</div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14.5, marginBottom: 3 }}>{s.t}</div>
+                  <div style={{ fontSize: 13.5, color: "#8893a3", lineHeight: 1.55 }}>{s.d}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        {/* Miért jó */}
+        <Section title="Miért jó?">
+          <div style={S.benefitGrid}>
+            {benefits.map(([t, d]) => (
+              <div key={t} style={S.benefitCard}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
+                  <CheckCircle2 size={16} color="#69db7c" />
+                  <span style={{ fontWeight: 700, fontSize: 14 }}>{t}</span>
+                </div>
+                <div style={{ fontSize: 13, color: "#8893a3", lineHeight: 1.5 }}>{d}</div>
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        {/* Demó videó helye */}
+        <Section title="Demó">
+          <div style={S.videoPlaceholder}>
+            <div style={{ textAlign: "center", color: "#5a6472" }}>
+              <MapPin size={28} style={{ marginBottom: 8, opacity: .6 }} />
+              <div style={{ fontSize: 13 }}>Bemutató videó helye — hamarosan</div>
+            </div>
+          </div>
+        </Section>
+
+        {/* Érdeklődő űrlap */}
+        <Section title="Érdeklődöm / ügyfél szeretnék lenni">
+          {sent ? (
+            <div style={{ ...S.lpCard, textAlign: "center", padding: "28px 20px" }}>
+              <CheckCircle2 size={38} color="#69db7c" style={{ marginBottom: 12 }} />
+              <div style={{ fontWeight: 700, fontSize: 16 }}>Köszönjük az érdeklődést!</div>
+              <div style={{ fontSize: 13.5, color: "#8893a3", marginTop: 6, lineHeight: 1.5 }}>
+                Hamarosan felvesszük veled a kapcsolatot a megadott elérhetőségen.
+              </div>
+            </div>
+          ) : (
+            <div style={S.lpCard}>
+              <p style={{ fontSize: 13.5, color: "#8893a3", marginTop: 0, marginBottom: 16, lineHeight: 1.5 }}>
+                Vedd fel velünk a kapcsolatot, és megmutatjuk, hogyan illeszthető a PlanStar a ti projektjeitekhez.
+              </p>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ flex: "1 1 200px" }}>
+                  <label style={S.miniLabel}>Cégnév *</label>
+                  <input style={S.input} value={form.company} onChange={set("company")} placeholder="Cég neve" />
+                </div>
+                <div style={{ flex: "1 1 200px" }}>
+                  <label style={S.miniLabel}>Kapcsolattartó</label>
+                  <input style={S.input} value={form.contact} onChange={set("contact")} placeholder="Név" />
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
+                <div style={{ flex: "1 1 200px" }}>
+                  <label style={S.miniLabel}>Telefon</label>
+                  <input style={S.input} value={form.phone} onChange={set("phone")} placeholder="+36 ..." />
+                </div>
+                <div style={{ flex: "1 1 200px" }}>
+                  <label style={S.miniLabel}>E-mail</label>
+                  <input style={S.input} value={form.email} onChange={set("email")} placeholder="@" />
+                </div>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <label style={S.miniLabel}>Üzenet</label>
+                <textarea style={{ ...S.input, minHeight: 80, resize: "vertical", fontFamily: sans }} value={form.message} onChange={set("message")} placeholder="Pár szó a projektjeitekről…" />
+              </div>
+              <div style={{ fontSize: 11.5, color: "#5a6472", margin: "10px 0" }}>* Cégnév és legalább egy elérhetőség szükséges.</div>
+              <button onClick={submit} style={{ ...S.primaryBtn, marginTop: 4 }}>
+                <Building2 size={16} /> Érdeklődés elküldése
+              </button>
+            </div>
+          )}
+        </Section>
+
+        {/* Cég / elérhetőség — placeholder, később kitöltjük */}
+        <div style={S.contactBlock}>
+          <div style={{ fontSize: 11, color: "#5a6472", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>Kapcsolat</div>
+          <div style={{ fontSize: 13.5, color: "#7a8499", lineHeight: 1.7 }}>
+            [Cégnév kerül ide]<br />
+            [Cím / székhely]<br />
+            [Telefon] · [E-mail]
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const Section = ({ title, children }) => (
+  <div style={{ marginBottom: 36 }}>
+    <h2 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 14px", borderLeft: "3px solid #e6b450", paddingLeft: 11 }}>{title}</h2>
+    {children}
+  </div>
+);
 
 /* ───────────────────────── 2) ADMIN KONZOL ──────────────────────── */
 function AdminConsole({ session, logout, users, setUsers, projects, setProjects, accessRequests, setAccessRequests }) {
@@ -470,6 +686,7 @@ function AdminConsole({ session, logout, users, setUsers, projects, setProjects,
 
             <div style={S.card}>
               <div style={S.cardHead}><FolderKanban size={16} /> Futó projektek ({projects.length})</div>
+              <div style={S.tableWrap}>
               <table style={S.table}>
                 <thead><tr>
                   {["Kód", "Projekt", "Generálkivitelező", "Fizetés", "Állapot"].map(h => <th key={h} style={S.th}>{h}</th>)}
@@ -490,6 +707,7 @@ function AdminConsole({ session, logout, users, setUsers, projects, setProjects,
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </>
         )}
@@ -503,6 +721,7 @@ function AdminConsole({ session, logout, users, setUsers, projects, setProjects,
                 <input style={{ ...S.input, width: 200, paddingLeft: 32, height: 32 }} placeholder="Keresés…" value={q} onChange={e => setQ(e.target.value)} />
               </div>
             </div>
+            <div style={S.tableWrap}>
             <table style={S.table}>
               <thead><tr>
                 {["Kód", "Név", "Szerepkör", "Projekt", "Hozzáférés", "Művelet"].map(h => <th key={h} style={S.th}>{h}</th>)}
@@ -529,6 +748,7 @@ function AdminConsole({ session, logout, users, setUsers, projects, setProjects,
                 ))}
               </tbody>
             </table>
+            </div>
             <div style={S.note}>
               Egyetlen gombnyomással kizárod a felhasználót — fizetési elmaradás esetén a következő belépésnél már nem tud bejelentkezni.
             </div>
@@ -1705,6 +1925,21 @@ const S = {
   loginWrap: { minHeight: "100vh", background: "#0a0e14", color: "#e8edf4", fontFamily: sans, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, position: "relative", overflow: "hidden" },
   grid: { position: "absolute", inset: 0, backgroundImage: "linear-gradient(#10151e 1px, transparent 1px), linear-gradient(90deg, #10151e 1px, transparent 1px)", backgroundSize: "40px 40px", opacity: 0.5, maskImage: "radial-gradient(ellipse at center, black, transparent 75%)" },
   loginCard: { position: "relative", width: "100%", maxWidth: 400, background: "#0e1320", border: "1px solid #1c2330", borderRadius: 16, padding: 32, boxShadow: "0 24px 64px rgba(0,0,0,.5)" },
+  backLink: { position: "absolute", top: 16, left: 18, background: "none", border: "none", color: "#7a8499", fontSize: 13, cursor: "pointer", padding: 4 },
+  homeBtnPrimary: { display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "16px", background: "linear-gradient(135deg, #e6b450, #d4943a)", color: "#0a0e14", border: "none", borderRadius: 11, fontWeight: 700, fontSize: 16, cursor: "pointer" },
+  homeBtnSecondary: { display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "16px", background: "#0e1320", color: "#e8edf4", border: "1px solid #2a3444", borderRadius: 11, fontWeight: 600, fontSize: 15, cursor: "pointer" },
+  landingNav: { position: "sticky", top: 0, zIndex: 10, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", background: "#0a0e14e6", borderBottom: "1px solid #1c2330", backdropFilter: "blur(8px)" },
+  backLink2: { background: "none", border: "none", color: "#7a8499", fontSize: 13.5, cursor: "pointer", padding: 4 },
+  navLoginBtn: { background: "#141a26", border: "1px solid #2a3444", color: "#e8edf4", padding: "7px 16px", borderRadius: 8, fontSize: 13.5, fontWeight: 600, cursor: "pointer" },
+  lpText: { fontSize: 14.5, color: "#9fb0c3", lineHeight: 1.7, margin: 0 },
+  lpCard: { background: "#0e1320", border: "1px solid #1c2330", borderRadius: 14, padding: 20 },
+  audienceChip: { background: "#0e1320", border: "1px solid #2a3444", borderRadius: 8, padding: "9px 14px", fontSize: 14, fontWeight: 600, color: "#cdd6e3" },
+  stepRow: { display: "flex", gap: 14, alignItems: "flex-start", background: "#0e1320", border: "1px solid #1c2330", borderRadius: 12, padding: "14px 16px" },
+  stepNum: { flexShrink: 0, width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg, #e6b450, #d4943a)", color: "#0a0e14", fontWeight: 800, fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" },
+  benefitGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 },
+  benefitCard: { background: "#0e1320", border: "1px solid #1c2330", borderRadius: 12, padding: "14px 16px" },
+  videoPlaceholder: { aspectRatio: "16/9", background: "#0c1019", border: "1px dashed #2a3444", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center" },
+  contactBlock: { background: "#0c1019", border: "1px solid #1c2330", borderRadius: 14, padding: 20, marginTop: 8 },
   logoMark: { width: 42, height: 42, borderRadius: 11, background: "linear-gradient(135deg, #e6b450, #d4943a)", display: "flex", alignItems: "center", justifyContent: "center" },
   logoMarkSm: { width: 28, height: 28, borderRadius: 8, background: "linear-gradient(135deg, #e6b450, #d4943a)", display: "flex", alignItems: "center", justifyContent: "center" },
   input: { width: "100%", boxSizing: "border-box", background: "#070a10", border: "1px solid #1c2330", borderRadius: 9, padding: "11px 13px", color: "#e8edf4", fontSize: 14, fontFamily: sans, outline: "none" },
@@ -1728,12 +1963,13 @@ const S = {
   payerBtn: { flex: 1, padding: "10px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", background: "#0a0e16", border: "1px solid #1c2330", color: "#9fb0c3" },
   payerBtnOn: { background: "#4dabf7", border: "1px solid #4dabf7", color: "#0a0e14" },
   callBtn: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, borderRadius: 6, background: "#69db7c1a", color: "#69db7c", border: "1px solid #69db7c40", textDecoration: "none", flexShrink: 0 },
-  card: { background: "#0e1320", border: "1px solid #1c2330", borderRadius: 14, padding: 20, marginBottom: 18 },
+  card: { background: "#0e1320", border: "1px solid #1c2330", borderRadius: 14, padding: 20, marginBottom: 18, overflow: "hidden" },
   cardHead: { display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 14.5, marginBottom: 16, color: "#cdd6e3" },
   miniLabel: { display: "block", fontSize: 11, color: "#7a8499", marginBottom: 6, fontWeight: 500 },
   codeChip: { fontFamily: mono, fontSize: 16, fontWeight: 700, color: "#e6b450", background: "#070a10", border: "1px solid #e6b45030", borderRadius: 9, padding: "9px 14px" },
   note: { marginTop: 14, fontSize: 12, color: "#5a6472", lineHeight: 1.5, borderTop: "1px solid #141a26", paddingTop: 12 },
-  table: { width: "100%", borderCollapse: "collapse", fontSize: 13.5 },
+  tableWrap: { overflowX: "auto", margin: "0 -4px", WebkitOverflowScrolling: "touch" },
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 13.5, minWidth: 520 },
   th: { textAlign: "left", padding: "8px 10px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", color: "#5a6472", borderBottom: "1px solid #1c2330", fontWeight: 600 },
   tr: { borderBottom: "1px solid #141a26" },
   td: { padding: "11px 10px", verticalAlign: "middle" },
