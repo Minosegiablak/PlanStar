@@ -1080,10 +1080,49 @@ function AdminConsole({ session, logout }) {
                 <div><span style={{ color: "#7a8499", fontSize: 12 }}>Azonosító kód</span><br /><code style={{ color: "#e6b450", fontSize: 18, fontWeight: 700 }}>{issued.code}</code></div>
                 <div style={{ marginTop: 10 }}><span style={{ color: "#7a8499", fontSize: 12 }}>PIN kód</span><br /><code style={{ color: "#e6b450", fontSize: 18, fontWeight: 700 }}>{issued.pin}</code></div>
               </div>
+              <IssuedShareButtons issued={issued} />
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Másolás és email-küldés gombok a frissen kiadott belépéshez.
+function IssuedShareButtons({ issued }) {
+  const [copied, setCopied] = useState(false);
+
+  const shareText =
+    `Üdvözlünk a PlanStar rendszerében!\n\n` +
+    `A ${issued.projectId} projekthez kaptál hozzáférést (${issued.trade}).\n\n` +
+    `Azonosító kód: ${issued.code}\n` +
+    `PIN kód: ${issued.pin}\n\n` +
+    `Belépés itt: https://plan-star.vercel.app\n` +
+    `Kattints a "Már ügyfél vagyok" gombra, és add meg a kódot és a PIN-t.`;
+
+  const copyAll = async () => {
+    try {
+      await navigator.clipboard.writeText(shareText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  const subject = encodeURIComponent(`PlanStar belépés — ${issued.projectId}`);
+  const body = encodeURIComponent(shareText);
+  const mailtoHref = `mailto:?subject=${subject}&body=${body}`;
+
+  return (
+    <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+      <button onClick={copyAll} style={{ ...S.secondaryBtnSm, flex: 1, justifyContent: "center" }}>
+        {copied ? <><CheckCircle2 size={15} /> Kimásolva</> : <><Copy size={15} /> Másolás</>}
+      </button>
+      <a href={mailtoHref} style={{ ...S.primaryBtnSm, flex: 1, justifyContent: "center", textDecoration: "none" }}>
+        <MessageSquare size={15} /> E-mail küldése
+      </a>
     </div>
   );
 }
