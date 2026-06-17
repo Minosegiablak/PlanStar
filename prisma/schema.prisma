@@ -1,0 +1,239 @@
+// PlanStar — adatbázis séma (Prisma + PostgreSQL/Neon)
+// Ez a fájl írja le, milyen táblák és kapcsolatok vannak az adatbázisban.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")          // pooled kapcsolat (lekérdezésekhez)
+  directUrl = env("DATABASE_URL_UNPOOLED") // direct kapcsolat (migrációkhoz)
+}
+
+// ─────────────────────────────────────────────────────────────
+// Szerepkörök és státuszok (enumok)
+// ─────────────────────────────────────────────────────────────
+enum Role {
+  ADMIN     // Fő Admin (te) — mindent lát és kezel
+  GC        // Generálkivitelező / Építésvezető
+  TRADE     // Partner szakma (villanyszerelő, nyílászárós…)
+  INVESTOR  // Beruházó / Tulajdonos
+}
+
+enum TicketStatus {
+  NYITOTT
+  FOLYAMATBAN
+  JAVITVA
+  LEZARVA
+}
+
+enum RequestStatus {
+  FUGGOBEN     // beérkezett kérés, még nincs döntés
+  KOD_KIADVA   // jóváhagyva, kód kiadva
+  ELUTASITVA   // elutasítva
+}
+
+enum PaymentStatus {
+  VART         // befizetésre vár
+  BEERKEZETT   // befizetve
+  ELENGEDVE    // díjmentes
+}
+
+enum Payer {
+  GC           // a generálkivitelező fizet
+  TRADE        // az alvállalkozó fizet
+}
+
+// ─────────────────────────────────────────────────────────────
+// Felhasználó — kódos belépés (kód + PIN), szerepkörrel
+// EGY user (pl. egy GC cég) TÖBB projekthez is hozzáférhet —
+// ezt a ProjectMember kapcsolótábla írja le lentebb.
+// ─────────────────────────────────────────────────────────────
+model User {
+  id        String   @id @default(cuid())
+  code      String   @unique               // egyedi belépési kód, pl. "GC-2026-7781"
+  pinHash   String                          // a PIN TITKOSÍTVA (soha nem nyersen!)
+  role      Role                            // alap-szerepkör (ADMIN-nál ez dönt; GC/TRADE/INVESTOR-nál a ProjectMember finomítja)
+  name      String                          // cég/személy neve
+  phone     String?                         // hívógombhoz
+  active    Boolean  @default(true)         // ki-/bekapcsolható hozzáférés (globálisan)
+
+  // melyik projekt(ek)hez van hozzáférése — ez teszi lehetővé, hogy egy GC
+  // egyszerre több futó projektet lásson és válthasson közöttük
+  memberships ProjectMember[]
+
+  createdTickets Ticket[] @relation("TicketCreatedBy")
+  notes          Note[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────
+// ProjectMember — kapcsolótábla: melyik user melyik projektben
+// milyen szerepkörben/szakmával vesz részt, és aktív-e OTT.
+// Egy GC több sorral szerepelhet (egy-egy projektenként).
+// Egy szakma jellemzően egy sorral (egy projekthez tegelve).
+// ─────────────────────────────────────────────────────────────
+model ProjectMember {
+  id        String   @id @default(cuid())
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  role      Role                            // szerepkör EBBEN a projektben (GC / TRADE / INVESTOR)
+  trade     String?                         // szakma neve, ha TRADE (pl. "Villanyszerelő")
+  active    Boolean  @default(true)         // ezen a projekten belül aktív-e (projektenként tiltható!)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, projectId])             // ugyanaz a user egy projekten belül csak egyszer szerepel
+  @@index([projectId])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Projekt — egyedi kóddal (2026/0001), a befizetés-azonosításhoz
+// ─────────────────────────────────────────────────────────────
+model Project {
+  id        String   @id @default(cuid())
+  code      String   @unique               // pl. "2026/0001"
+  name      String                          // projekt neve
+  gcName    String?                         // generálkivitelező neve (gyors kijelzéshez)
+  status    String   @default("Aktív")
+  paid      Boolean  @default(false)        // befizetés-állapot
+
+  memberships    ProjectMember[]
+  floorplans     Floorplan[]
+  tickets        Ticket[]
+  accessRequests AccessRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────
+// Alaprajz — egy projekthez több is tartozhat (szintek)
+// A kép maga fájltárhelyen (Vercel Blob) van, itt csak az URL.
+// ─────────────────────────────────────────────────────────────
+model Floorplan {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  name      String                          // pl. "Földszint"
+  imageUrl  String                          // a kép URL-je (Vercel Blob)
+  width     Int?                            // eredeti képméret (a pötty-arányokhoz)
+  height    Int?
+
+  tickets   Ticket[]
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Hibajegy (pötty) — az alaprajzra helyezve, szakmához tegelve
+// ─────────────────────────────────────────────────────────────
+model Ticket {
+  id          String       @id @default(cuid())
+  projectId   String
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  floorplanId String?
+  floorplan   Floorplan?   @relation(fields: [floorplanId], references: [id], onDelete: SetNull)
+
+  title       String
+  room        String?                       // helyiség (opcionális)
+  x           Float                         // pozíció az alaprajzon (%)
+  y           Float
+  trade       String                        // felelős szakma (a tegelés — ez vezérli az izolációt!)
+  status      TicketStatus @default(NYITOTT)
+  isPrivate   Boolean      @default(false)  // privát/belső jegy
+  cleaningFor String[]     @default([])     // takarítás-kérésnél az érintett szakmák
+
+  createdById String?
+  createdBy   User?        @relation("TicketCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  notes       Note[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([projectId])
+  @@index([trade])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Bejegyzés — egy hibajegyhez fűzött üzenet, opcionális fotóval
+// ─────────────────────────────────────────────────────────────
+model Note {
+  id        String   @id @default(cuid())
+  ticketId  String
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  authorId  String?
+  author    User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  authorName String                         // a szerző neve (megmarad akkor is, ha a user törlődik)
+  authorRole Role
+
+  text      String?                         // szöveg (lehet üres, ha csak kép)
+  imageUrl  String?                         // csatolt kép URL-je (Vercel Blob)
+
+  createdAt DateTime @default(now())
+
+  @@index([ticketId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Hozzáférés-kérés — a GC meghív egy alvállalkozót, te jóváhagyod
+// A fizetés állapota itt van, hogy később automatizálható legyen.
+// ─────────────────────────────────────────────────────────────
+model AccessRequest {
+  id          String        @id @default(cuid())
+  projectId   String
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  requestedBy String                         // ki kérte (GC neve)
+  trade       String                         // milyen szakmát hív meg
+
+  // cégadatok
+  companyName String
+  companySeat String?
+  taxId       String?
+  contact     String?
+  phone       String?
+  email       String?
+
+  // fizetés
+  payer         Payer
+  amount        Int           @default(0)
+  paymentStatus PaymentStatus @default(VART)
+  paymentRef    String?                      // utalás-azonosító (jövőbeli automatizáláshoz)
+
+  // állapot + kiadott belépés
+  status      RequestStatus @default(FUGGOBEN)
+  issuedCode  String?
+  issuedPin   String?                        // a kiadott PIN (egyszer megmutatva)
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([projectId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Érdeklődés — a landing oldal űrlapjából (leadek)
+// ─────────────────────────────────────────────────────────────
+model Inquiry {
+  id        String   @id @default(cuid())
+  company   String
+  contact   String?
+  phone     String?
+  email     String?
+  message   String?
+  handled   Boolean  @default(false)        // megnézted-e már
+  createdAt DateTime @default(now())
+}
