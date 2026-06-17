@@ -125,6 +125,7 @@ const api = {
   addNote: (projectId, ticketId, data) => apiCall(`/api/projects/${projectId}/tickets/${ticketId}/notes`, { method: "POST", body: JSON.stringify(data) }),
 
   listUsers: () => apiCall("/api/admin/users"),
+  createUser: (data) => apiCall("/api/admin/users", { method: "POST", body: JSON.stringify(data) }),
   setUserActive: (userId, data) => apiCall(`/api/admin/users/${userId}`, { method: "PATCH", body: JSON.stringify(data) }),
 
   listAccessRequests: () => apiCall("/api/access-requests"),
@@ -710,6 +711,45 @@ function AdminConsole({ session, logout }) {
     }
   };
 
+  // ── Új felhasználó (GC / szakma / beruházó) létrehozása ──────────────
+  const [showNewUser, setShowNewUser] = useState(false);
+  const [nuName, setNuName] = useState("");
+  const [nuRole, setNuRole] = useState(ROLE.GC);
+  const [nuTrade, setNuTrade] = useState(TRADES[0]);
+  const [nuPhone, setNuPhone] = useState("");
+  const [nuProjectId, setNuProjectId] = useState("");
+  const [nuCreating, setNuCreating] = useState(false);
+  const [nuError, setNuError] = useState("");
+
+  const createNewUser = async () => {
+    if (!nuName.trim()) { setNuError("A név megadása kötelező."); return; }
+    setNuCreating(true);
+    setNuError("");
+    try {
+      const res = await api.createUser({
+        name: nuName.trim(),
+        role: nuRole,
+        phone: nuPhone.trim(),
+        trade: nuRole === ROLE.TRADE ? nuTrade : undefined,
+        projectId: nuProjectId || undefined,
+      });
+      const projectLabel = projects.find(p => p.id === nuProjectId)?.code || "";
+      setIssued({
+        code: res.user.code, pin: res.pin,
+        company: res.user.name,
+        trade: nuRole === ROLE.TRADE ? nuTrade : ROLE_META[nuRole].label,
+        projectId: projectLabel,
+      });
+      setShowNewUser(false);
+      setNuName(""); setNuPhone(""); setNuProjectId("");
+      await reload();
+    } catch (e) {
+      setNuError(e.message);
+    } finally {
+      setNuCreating(false);
+    }
+  };
+
   const togglePaid = async (projectId, currentlyPaid) => {
     setActionError("");
     try {
@@ -845,6 +885,58 @@ function AdminConsole({ session, logout }) {
                 <input style={{ ...S.input, width: 200, paddingLeft: 32, height: 32 }} placeholder="Keresés…" value={q} onChange={e => setQ(e.target.value)} />
               </div>
             </div>
+
+            {actionError && <div style={S.errorBox}><AlertTriangle size={15} /> <span>{actionError}</span></div>}
+
+            {!showNewUser ? (
+              <button onClick={() => setShowNewUser(true)} style={{ ...S.primaryBtnSm, marginBottom: 14 }}>
+                <Plus size={15} /> Új felhasználó hozzáadása
+              </button>
+            ) : (
+              <div style={{ ...S.note, background: "#161c27", padding: 14, borderRadius: 10, marginBottom: 14 }}>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+                  <div style={{ flex: "1 1 180px" }}>
+                    <label style={S.miniLabel}>Név / cégnév</label>
+                    <input style={S.input} placeholder="pl. Kovács Bau Kft." value={nuName} onChange={e => setNuName(e.target.value)} />
+                  </div>
+                  <div style={{ flex: "0 0 160px" }}>
+                    <label style={S.miniLabel}>Szerepkör</label>
+                    <select style={S.input} value={nuRole} onChange={e => setNuRole(e.target.value)}>
+                      <option value={ROLE.GC}>Generálkivitelező</option>
+                      <option value={ROLE.TRADE}>Szakma</option>
+                      <option value={ROLE.INVESTOR}>Beruházó</option>
+                    </select>
+                  </div>
+                  {nuRole === ROLE.TRADE && (
+                    <div style={{ flex: "0 0 160px" }}>
+                      <label style={S.miniLabel}>Szakma</label>
+                      <select style={S.input} value={nuTrade} onChange={e => setNuTrade(e.target.value)}>
+                        {TRADES.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  <div style={{ flex: "0 0 160px" }}>
+                    <label style={S.miniLabel}>Telefon (opcionális)</label>
+                    <input style={S.input} placeholder="+36 30 …" value={nuPhone} onChange={e => setNuPhone(e.target.value)} />
+                  </div>
+                  <div style={{ flex: "1 1 200px" }}>
+                    <label style={S.miniLabel}>Projekt hozzárendelése</label>
+                    <select style={S.input} value={nuProjectId} onChange={e => setNuProjectId(e.target.value)}>
+                      <option value="">— nincs (csak létrehozás) —</option>
+                      {projects.map(p => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                {nuError && <div style={{ ...S.errorBox, marginTop: 10 }}><AlertTriangle size={15} /> <span>{nuError}</span></div>}
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <button onClick={createNewUser} disabled={nuCreating} style={{ ...S.primaryBtnSm, opacity: nuCreating ? 0.6 : 1 }}>
+                    <Plus size={15} /> {nuCreating ? "Létrehozás…" : "Létrehozás"}
+                  </button>
+                  <button onClick={() => { setShowNewUser(false); setNuError(""); }} style={S.secondaryBtnSm}>Mégse</button>
+                </div>
+              </div>
+            )}
+
             <div style={S.tableWrap}>
             <table style={S.table}>
               <thead><tr>
@@ -2191,6 +2283,7 @@ const S = {
   eyeBtn: { position: "absolute", right: 10, top: 9, background: "none", border: "none", color: "#5a6472", cursor: "pointer", padding: 4 },
   primaryBtn: { width: "100%", marginTop: 6, padding: "12px", background: "linear-gradient(135deg, #e6b450, #d4943a)", color: "#0a0e14", border: "none", borderRadius: 9, fontWeight: 700, fontSize: 15, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 },
   primaryBtnSm: { padding: "10px 16px", background: "linear-gradient(135deg, #e6b450, #d4943a)", color: "#0a0e14", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, height: 40 },
+  secondaryBtnSm: { padding: "10px 16px", background: "transparent", color: "#9fb0c3", border: "1px solid #2a3441", borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, height: 40 },
   errorBox: { display: "flex", gap: 8, alignItems: "flex-start", background: "#2a1416", border: "1px solid #ff6b6b40", color: "#ff9b9b", padding: "10px 12px", borderRadius: 8, fontSize: 12.5, marginBottom: 14, lineHeight: 1.4 },
   hintBox: { marginTop: 24, paddingTop: 18, borderTop: "1px solid #1c2330", fontSize: 11.5 },
   hintRow: { display: "flex", justifyContent: "space-between", padding: "3px 0", fontFamily: mono },
