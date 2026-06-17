@@ -11,7 +11,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashPin } from "@/lib/password";
 import { generatePin } from "@/lib/codes";
-
+export const dynamic = "force-dynamic";
 export async function GET() {
   // Ha már van admin, nem csinálunk semmit — nem írjuk felül véletlenül.
   const existingAdmin = await prisma.user.findFirst({ where: { role: "ADMIN" } });
