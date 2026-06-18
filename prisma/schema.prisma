@@ -16,9 +16,11 @@ datasource db {
 // ─────────────────────────────────────────────────────────────
 enum Role {
   ADMIN     // Fő Admin (te) — mindent lát és kezel
-  GC        // Generálkivitelező / Építésvezető
+  GC        // Generálkivitelező
+  EV        // Építésvezető — a GC-vel azonos jogkörű, megbízott személy
   TRADE     // Partner szakma (villanyszerelő, nyílászárós…)
   INVESTOR  // Beruházó / Tulajdonos
+}
 }
 
 enum TicketStatus {
