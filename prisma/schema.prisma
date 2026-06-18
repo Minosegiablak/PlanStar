@@ -21,7 +21,6 @@ enum Role {
   TRADE     // Partner szakma (villanyszerelő, nyílászárós…)
   INVESTOR  // Beruházó / Tulajdonos
 }
-}
 
 enum TicketStatus {
   NYITOTT
