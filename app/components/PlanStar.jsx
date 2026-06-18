@@ -15,7 +15,8 @@ import {
 
 const ROLE = {
   ADMIN: "ADMIN",          // Fő Admin (Te)
-  GC: "GC",                // Generálkivitelező / Építésvezető
+  GC: "GC",                // Generálkivitelező
+  EV: "EV",                // Építésvezető (a GC-vel azonos jogkörű megbízott)
   TRADE: "TRADE",          // Partner szakma (villanyszerelő, nyílászárós...)
   INVESTOR: "INVESTOR",    // Beruházó / Tulajdonos
 };
@@ -23,6 +24,7 @@ const ROLE = {
 const ROLE_META = {
   ADMIN:    { label: "Fő Admin",          icon: Crown,    color: "#e6b450" },
   GC:       { label: "Generálkivitelező", icon: HardHat,  color: "#4dabf7" },
+  EV:       { label: "Építésvezető",       icon: ShieldCheck, color: "#3bc9db" },
   TRADE:    { label: "Partner szakma",    icon: Wrench,   color: "#69db7c" },
   INVESTOR: { label: "Beruházó",          icon: Building2,color: "#b197fc" },
 };
@@ -130,6 +132,7 @@ const api = {
 
   listAccessRequests: () => apiCall("/api/access-requests"),
   createAccessRequest: (data) => apiCall("/api/access-requests", { method: "POST", body: JSON.stringify(data) }),
+  inviteEv: (projectId, data) => apiCall(`/api/projects/${projectId}/invite-ev`, { method: "POST", body: JSON.stringify(data) }),
   decideAccessRequest: (requestId, data) => apiCall(`/api/admin/access-requests/${requestId}`, { method: "PATCH", body: JSON.stringify(data) }),
 
   submitInquiry: (data) => apiCall("/api/inquiries", { method: "POST", body: JSON.stringify(data) }),
@@ -227,7 +230,7 @@ function useIsMobile(breakpoint = 820) {
    a renderelés szempontjából kényelmi segédfüggvény.
 ─────────────────────────────────────────────────────────────────── */
 function canSeeCommunication(user) {
-  return user.role === ROLE.ADMIN || user.projectRole === ROLE.GC || user.projectRole === ROLE.TRADE;
+  return user.role === ROLE.ADMIN || user.projectRole === ROLE.GC || user.projectRole === ROLE.EV || user.projectRole === ROLE.TRADE;
 }
 
 /* ───────────────────────── UI SEGÉDKOMPONENSEK ───────────────────── */
@@ -342,6 +345,10 @@ export default function PlanStar() {
 /* Projektválasztó — ha a usernek (jellemzően GC-nek) több aktív projektje
    van, belépés után itt választja ki, melyikbe lép. */
 function ProjectPicker({ projects, onPick, onCancel, error }) {
+  const [q, setQ] = useState("");
+  const filtered = projects.filter(p =>
+    p.name.toLowerCase().includes(q.toLowerCase()) || p.code.toLowerCase().includes(q.toLowerCase()));
+
   return (
     <div style={S.loginWrap}>
       <div style={S.grid} />
@@ -352,8 +359,20 @@ function ProjectPicker({ projects, onPick, onCancel, error }) {
           Több futó projekthez is van hozzáférésed. Melyikbe szeretnél belépni?
         </div>
         {error && <div style={S.errorBox}><AlertTriangle size={15} /> <span>{error}</span></div>}
+        {projects.length > 3 && (
+          <div style={{ position: "relative", marginBottom: 14 }}>
+            <Search size={14} style={{ position: "absolute", left: 12, top: 13, color: "#5a6472" }} />
+            <input
+              style={{ ...S.input, paddingLeft: 34 }}
+              placeholder="Keresés projekt neve vagy kódja szerint…"
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              autoFocus
+            />
+          </div>
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {projects.map(p => (
+          {filtered.map(p => (
             <button key={p.projectId} onClick={() => onPick(p.projectId)} style={S.projectPickBtn}>
               <div style={{ textAlign: "left" }}>
                 <div style={{ fontWeight: 700, fontSize: 14.5 }}>{p.name}</div>
@@ -362,6 +381,11 @@ function ProjectPicker({ projects, onPick, onCancel, error }) {
               <span style={{ color: "#5a6472" }}>→</span>
             </button>
           ))}
+          {filtered.length === 0 && (
+            <div style={{ textAlign: "center", color: "#5a6472", fontSize: 13, padding: "12px 0" }}>
+              Nincs a keresésnek megfelelő projekt.
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -665,6 +689,8 @@ const Section = ({ title, children }) => (
 function AdminConsole({ session, logout }) {
   const [tab, setTab] = useState("projects");
   const [q, setQ] = useState("");
+  const [projectQ, setProjectQ] = useState("");
+  const [projectPaidFilter, setProjectPaidFilter] = useState("all"); // "all" | "paid" | "pending"
   const [issued, setIssued] = useState(null); // frissen generált kód megjelenítéséhez
 
   const [projects, setProjects] = useState([]);
@@ -802,6 +828,18 @@ function AdminConsole({ session, logout }) {
   const filteredUsers = users.filter(u =>
     u.name.toLowerCase().includes(q.toLowerCase()) || u.code.toLowerCase().includes(q.toLowerCase()));
 
+  const filteredProjects = projects.filter(p => {
+    const matchesQ =
+      p.name.toLowerCase().includes(projectQ.toLowerCase()) ||
+      p.code.toLowerCase().includes(projectQ.toLowerCase()) ||
+      (p.gcName || "").toLowerCase().includes(projectQ.toLowerCase());
+    const matchesPaid =
+      projectPaidFilter === "all" ||
+      (projectPaidFilter === "paid" && p.paid) ||
+      (projectPaidFilter === "pending" && !p.paid);
+    return matchesQ && matchesPaid;
+  });
+
   if (loading) {
     return (
       <div style={S.appWrap}>
@@ -851,14 +889,29 @@ function AdminConsole({ session, logout }) {
             </div>
 
             <div style={S.card}>
-              <div style={S.cardHead}><FolderKanban size={16} /> Futó projektek ({projects.length})</div>
+              <div style={{ ...S.cardHead, justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <FolderKanban size={16} /> Futó projektek ({filteredProjects.length}{filteredProjects.length !== projects.length ? ` / ${projects.length}` : ""})
+                </span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <select style={{ ...S.input, height: 32, width: 140 }} value={projectPaidFilter} onChange={e => setProjectPaidFilter(e.target.value)}>
+                    <option value="all">Összes</option>
+                    <option value="paid">Befizetve</option>
+                    <option value="pending">Függőben</option>
+                  </select>
+                  <div style={{ position: "relative" }}>
+                    <Search size={14} style={{ position: "absolute", left: 10, top: 9, color: "#5a6472" }} />
+                    <input style={{ ...S.input, width: 200, paddingLeft: 32, height: 32 }} placeholder="Keresés név, kód, GC szerint…" value={projectQ} onChange={e => setProjectQ(e.target.value)} />
+                  </div>
+                </div>
+              </div>
               <div style={S.tableWrap}>
               <table style={S.table}>
                 <thead><tr>
                   {["Kód", "Projekt", "Generálkivitelező", "Fizetés", "Állapot"].map(h => <th key={h} style={S.th}>{h}</th>)}
                 </tr></thead>
                 <tbody>
-                  {projects.map(p => (
+                  {filteredProjects.map(p => (
                     <tr key={p.id} style={S.tr}>
                       <td style={S.td}><code style={{ color: "#e6b450", fontWeight: 600 }}>{p.code}</code></td>
                       <td style={S.td}>{p.name}</td>
@@ -871,6 +924,9 @@ function AdminConsole({ session, logout }) {
                       <td style={S.td}><Pill color="#69db7c">{p.status}</Pill></td>
                     </tr>
                   ))}
+                  {filteredProjects.length === 0 && (
+                    <tr><td colSpan={5} style={{ ...S.td, textAlign: "center", color: "#5a6472" }}>Nincs a szűrésnek megfelelő projekt.</td></tr>
+                  )}
                 </tbody>
               </table>
               </div>
@@ -905,6 +961,7 @@ function AdminConsole({ session, logout }) {
                     <label style={S.miniLabel}>Szerepkör</label>
                     <select style={S.input} value={nuRole} onChange={e => setNuRole(e.target.value)}>
                       <option value={ROLE.GC}>Generálkivitelező</option>
+                      <option value={ROLE.EV}>Építésvezető</option>
                       <option value={ROLE.TRADE}>Szakma</option>
                       <option value={ROLE.INVESTOR}>Beruházó</option>
                     </select>
@@ -1147,10 +1204,90 @@ function ProjectView({ session, logout }) {
     setUsers(res.users);
   };
 
-  // ── Alaprajz feltöltése ────────────────────────────────────────────
+  // ── Alaprajz feltöltése (kép vagy PDF) ──────────────────────────────
   const [uploadingFp, setUploadingFp] = useState(false);
   const [fpError, setFpError] = useState("");
   const fpInputRef = useRef(null);
+
+  // PDF.js dinamikus betöltése CDN-ről (csak akkor, ha PDF-et választott a
+  // felhasználó — így a normál kép-feltöltés nem lassul ettől).
+  const loadPdfJs = () => new Promise((resolve, reject) => {
+    if (window.pdfjsLib) { resolve(window.pdfjsLib); return; }
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    script.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      resolve(window.pdfjsLib);
+    };
+    script.onerror = () => reject(new Error("A PDF-feldolgozó betöltése nem sikerült. Ellenőrizd az internetkapcsolatot."));
+    document.head.appendChild(script);
+  });
+
+  // A PDF első lapját nagy felbontású JPEG-gé rendereli (canvas-on keresztül),
+  // és visszaadja a kép data-URL-jét — onnantól ugyanúgy kezelhető, mint egy
+  // sima feltöltött kép. A Vercel szerver kérés-mérete kb. 4,5 MB-ra van
+  // korlátozva, ezért ha a render túl nagy lenne, automatikusan kisebb
+  // felbontásra (scale) váltunk.
+  const pdfFirstPageToImage = async (file) => {
+    const pdfjsLib = await loadPdfJs();
+    const buffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+    const page = await pdf.getPage(1);
+
+    const renderAtScale = async (scale) => {
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      return canvas.toDataURL("image/jpeg", 0.9);
+    };
+
+    // Próbálkozás csökkenő felbontással, amíg a base64-méret elfér a
+    // szerver kérés-korlátján belül (kb. 4,5 MB, ezért 3,5 MB-os céllal
+    // dolgozunk biztonsági ráhagyással).
+    const MAX_BYTES = 3.5 * 1024 * 1024;
+    for (const scale of [2.2, 1.8, 1.4, 1.0]) {
+      const dataUrl = await renderAtScale(scale);
+      // base64 ~ 4/3-szor nagyobb, mint a nyers bájtméret
+      const approxBytes = dataUrl.length * 0.75;
+      if (approxBytes <= MAX_BYTES) return dataUrl;
+    }
+    // Ha még az 1.0-s skála is túl nagy lenne, azt is visszaadjuk —
+    // legalább próbálkozzon a feltöltés, a szerver majd jelez, ha tényleg nem fér el.
+    return renderAtScale(1.0);
+  };
+
+  // Ha a kép (pl. telefonnal fotózott alaprajz) túl nagy lenne a szerver
+  // kérés-korlátjához, canvas-szal kicsinyítjük, amíg elfér.
+  const resizeImageIfNeeded = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      const rawDataUrl = reader.result;
+      const approxBytes = file.size;
+      const MAX_BYTES = 3.5 * 1024 * 1024;
+      if (approxBytes <= MAX_BYTES) { resolve(rawDataUrl); return; }
+
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        let scale = Math.sqrt(MAX_BYTES / approxBytes);
+        scale = Math.min(scale, 1);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.88));
+      };
+      img.src = rawDataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
 
   const onFloorplanFileChosen = async (e) => {
     const file = e.target.files?.[0];
@@ -1158,12 +1295,10 @@ function ProjectView({ session, logout }) {
     setFpError("");
     setUploadingFp(true);
     try {
-      const dataUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
+      const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+      const dataUrl = isPdf
+        ? await pdfFirstPageToImage(file)
+        : await resizeImageIfNeeded(file);
       const url = await api.uploadImage(dataUrl);
       await api.createFloorplan(session.projectId, { name: file.name, imageUrl: url });
       await reload();
@@ -1178,7 +1313,7 @@ function ProjectView({ session, logout }) {
   useEffect(() => {
     Promise.all([
       api.getProject(session.projectId),
-      session.projectRole === ROLE.GC ? api.listAccessRequests() : Promise.resolve({ requests: [] }),
+      (session.projectRole === ROLE.GC || session.projectRole === ROLE.EV) ? api.listAccessRequests() : Promise.resolve({ requests: [] }),
     ])
       .then(([proj, reqs]) => {
         setProject(proj.project);
@@ -1192,8 +1327,8 @@ function ProjectView({ session, logout }) {
   }, []);
 
   const seeComm = canSeeCommunication(session);
-  const canEdit = session.role === ROLE.ADMIN || session.projectRole === ROLE.GC; // csak GC/Admin helyezhet le
-  const isGC = session.projectRole === ROLE.GC || session.role === ROLE.ADMIN;
+  const canEdit = session.role === ROLE.ADMIN || session.projectRole === ROLE.GC || session.projectRole === ROLE.EV; // GC/EV/Admin helyezhet le
+  const isGC = session.projectRole === ROLE.GC || session.projectRole === ROLE.EV || session.role === ROLE.ADMIN;
   const isMobile = useIsMobile();
 
   // A szerver már a jogosultság szerint szűrve adta vissza a tickets-et —
@@ -1508,7 +1643,7 @@ function ProjectView({ session, logout }) {
               )}
               {canEdit && (
                 <>
-                  <input ref={fpInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFloorplanFileChosen} />
+                  <input ref={fpInputRef} type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={onFloorplanFileChosen} />
                   <button onClick={() => fpInputRef.current?.click()} disabled={uploadingFp} style={{ ...S.placeToggle, opacity: uploadingFp ? 0.6 : 1 }}>
                     <ImageIcon size={15} /> {uploadingFp ? "Feltöltés…" : (floorplans.length ? "Alaprajz csere" : "Alaprajz feltöltése")}
                   </button>
@@ -1704,6 +1839,7 @@ function ProjectView({ session, logout }) {
             </div>
             <div style={{ fontSize: 12.5, color: "#8893a3", lineHeight: 1.6 }}>
               {session.role === ROLE.GC && "Teljes projekt: minden alaprajz, minden hibajegy és minden kommunikáció. Te helyezel le pöttyöket és tegeled a szakmákat."}
+              {session.role === ROLE.EV && "Teljes projekt: a generálkivitelezővel azonos jogkörben mindent látsz, mindenkinek írhatsz, és pöttyöket helyezhetsz le."}
               {session.role === ROLE.TRADE && `Kizárólag a(z) „${session.trade}” szakmához tegelt, nem privát hibajegyek. Más szakmák ügyei és a belső bejegyzések rejtve maradnak.`}
               {session.role === ROLE.INVESTOR && "Korlátozott szemlélő nézet: a projekt és a nyilvános pöttyök általános státusza. Belső szakmai vitákat nem látsz."}
             </div>
@@ -1834,6 +1970,7 @@ function MembersModal({ users, onClose }) {
 
 /* Alvállalkozó-meghívó űrlap (GC tölti ki) — cégadatok + ki fizet */
 function InviteModal({ session, projectId, onClose, onSubmit }) {
+  const [inviteType, setInviteType] = useState("TRADE"); // "TRADE" | "EV"
   const [trade, setTrade] = useState(TRADES[0]);
   const [name, setName] = useState("");
   const [seat, setSeat] = useState("");
@@ -1843,6 +1980,7 @@ function InviteModal({ session, projectId, onClose, onSubmit }) {
   const [email, setEmail] = useState("");
   const [payer, setPayer] = useState(PAYER.TRADE);
   const [sent, setSent] = useState(false);
+  const [evResult, setEvResult] = useState(null); // { pin, code } EV-meghívás után
   const [sending, setSending] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
@@ -1857,15 +1995,23 @@ function InviteModal({ session, projectId, onClose, onSubmit }) {
     setSending(true);
     setSubmitError("");
     try {
-      const res = await api.createAccessRequest({
-        trade,
-        companyName: name.trim(), companySeat: seat.trim(), taxId: taxId.trim(),
-        contact: contact.trim(), phone: phone.trim(), email: email.trim(),
-        payer: payer === PAYER.GC ? "GC" : "TRADE",
-        amount: 15000,
-      });
-      setSent(true);
-      onSubmit(res.accessRequest);
+      if (inviteType === "EV") {
+        const res = await api.inviteEv(projectId, {
+          name: name.trim(), phone: phone.trim(), email: email.trim(),
+        });
+        setEvResult(res.user || res);
+        setSent(true);
+      } else {
+        const res = await api.createAccessRequest({
+          trade,
+          companyName: name.trim(), companySeat: seat.trim(), taxId: taxId.trim(),
+          contact: contact.trim(), phone: phone.trim(), email: email.trim(),
+          payer: payer === PAYER.GC ? "GC" : "TRADE",
+          amount: 15000,
+        });
+        setSent(true);
+        onSubmit(res.accessRequest);
+      }
     } catch (e) {
       setSubmitError(e.message);
     } finally {
@@ -1876,18 +2022,48 @@ function InviteModal({ session, projectId, onClose, onSubmit }) {
   return (
     <div style={S.modalOverlay} onClick={onClose}>
       <div style={S.modal} onClick={e => e.stopPropagation()}>
-        <div style={{ ...S.modalHead, borderTop: "3px solid #4dabf7" }}>
+        <div style={{ ...S.modalHead, borderTop: `3px solid ${inviteType === "EV" ? "#3bc9db" : "#4dabf7"}` }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
-              <Users size={17} color="#4dabf7" /> Alvállalkozó meghívása
+              <Users size={17} color={inviteType === "EV" ? "#3bc9db" : "#4dabf7"} /> {inviteType === "EV" ? "Építésvezető meghívása" : "Alvállalkozó meghívása"}
             </div>
-            <div style={{ fontSize: 12.5, color: "#8893a3", marginTop: 4 }}>{projectId} projekthez · a kérés az adminhoz kerül jóváhagyásra</div>
+            <div style={{ fontSize: 12.5, color: "#8893a3", marginTop: 4 }}>
+              {inviteType === "EV"
+                ? `${projectId} projekthez · azonnal létrejön, nincs admin-jóváhagyás`
+                : `${projectId} projekthez · a kérés az adminhoz kerül jóváhagyásra`}
+            </div>
           </div>
           <button onClick={onClose} style={S.modalClose}><X size={18} /></button>
         </div>
 
         <div style={S.modalBody}>
           {sent ? (
+            inviteType === "EV" ? (
+              <div style={{ textAlign: "center", padding: "10px 0" }}>
+                <CheckCircle2 size={36} color="#69db7c" style={{ marginBottom: 10 }} />
+                <div style={{ fontWeight: 700, fontSize: 15 }}>Építésvezető hozzáadva</div>
+                <div style={{ fontSize: 13, color: "#8893a3", marginTop: 6, lineHeight: 1.5 }}>
+                  Add át a belépési adatokat <b>{name.trim()}</b> részére. Az EV a generálkivitelezővel azonos jogkörrel lép be.
+                </div>
+                {evResult && (evResult.code || evResult.pin) && (
+                  <div style={{ marginTop: 14, padding: "12px 14px", background: "#161c27", borderRadius: 8, textAlign: "left" }}>
+                    {evResult.code && (
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ fontSize: 11, color: "#8893a3", textTransform: "uppercase", letterSpacing: ".3px" }}>Belépési kód</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "monospace", color: "#3bc9db" }}>{evResult.code}</div>
+                      </div>
+                    )}
+                    {evResult.pin && (
+                      <div>
+                        <div style={{ fontSize: 11, color: "#8893a3", textTransform: "uppercase", letterSpacing: ".3px" }}>PIN</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "monospace", color: "#3bc9db" }}>{evResult.pin}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <button onClick={onClose} style={{ ...S.primaryBtnSm, marginTop: 16, justifyContent: "center", width: "100%" }}>Bezárás</button>
+              </div>
+            ) : (
             <div style={{ textAlign: "center", padding: "10px 0" }}>
               <CheckCircle2 size={36} color="#69db7c" style={{ marginBottom: 10 }} />
               <div style={{ fontWeight: 700, fontSize: 15 }}>Kérés elküldve</div>
@@ -1896,29 +2072,50 @@ function InviteModal({ session, projectId, onClose, onSubmit }) {
               </div>
               <button onClick={onClose} style={{ ...S.primaryBtnSm, marginTop: 16, justifyContent: "center", width: "100%" }}>Bezárás</button>
             </div>
+            )
           ) : (
             <>
-              <label style={S.miniLabel}>Szakma</label>
-              <select style={{ ...S.input, marginBottom: 12, cursor: "pointer" }} value={trade} onChange={e => setTrade(e.target.value)}>
-                {TRADES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-
-              <label style={S.miniLabel}>Cégnév</label>
-              <input autoFocus style={{ ...S.input, marginBottom: 12 }} placeholder="pl. Csőmester Bt." value={name} onChange={e => setName(e.target.value)} />
-
-              <label style={S.miniLabel}>Székhely</label>
-              <input style={{ ...S.input, marginBottom: 12 }} placeholder="irányítószám, település, utca" value={seat} onChange={e => setSeat(e.target.value)} />
-
-              <div style={{ display: "flex", gap: 10 }}>
-                <div style={{ flex: 1 }}>
-                  <label style={S.miniLabel}>Adószám</label>
-                  <input style={{ ...S.input, marginBottom: 12 }} placeholder="________-_-__" value={taxId} onChange={e => setTaxId(e.target.value)} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={S.miniLabel}>Kapcsolattartó</label>
-                  <input style={{ ...S.input, marginBottom: 12 }} placeholder="név" value={contact} onChange={e => setContact(e.target.value)} />
-                </div>
+              <label style={S.miniLabel}>Meghívás típusa</label>
+              <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                <button onClick={() => setInviteType("TRADE")}
+                  style={{ ...S.payerBtn, ...(inviteType === "TRADE" ? S.payerBtnOn : {}) }}>
+                  Alvállalkozó
+                </button>
+                <button onClick={() => setInviteType("EV")}
+                  style={{ ...S.payerBtn, ...(inviteType === "EV" ? S.payerBtnOn : {}) }}>
+                  Építésvezető
+                </button>
               </div>
+
+              {inviteType === "TRADE" && (
+                <>
+                  <label style={S.miniLabel}>Szakma</label>
+                  <select style={{ ...S.input, marginBottom: 12, cursor: "pointer" }} value={trade} onChange={e => setTrade(e.target.value)}>
+                    {TRADES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </>
+              )}
+
+              <label style={S.miniLabel}>{inviteType === "EV" ? "Név" : "Cégnév"}</label>
+              <input autoFocus style={{ ...S.input, marginBottom: 12 }} placeholder={inviteType === "EV" ? "pl. Nagy Péter" : "pl. Csőmester Bt."} value={name} onChange={e => setName(e.target.value)} />
+
+              {inviteType === "TRADE" && (
+                <>
+                  <label style={S.miniLabel}>Székhely</label>
+                  <input style={{ ...S.input, marginBottom: 12 }} placeholder="irányítószám, település, utca" value={seat} onChange={e => setSeat(e.target.value)} />
+
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={S.miniLabel}>Adószám</label>
+                      <input style={{ ...S.input, marginBottom: 12 }} placeholder="________-_-__" value={taxId} onChange={e => setTaxId(e.target.value)} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={S.miniLabel}>Kapcsolattartó</label>
+                      <input style={{ ...S.input, marginBottom: 12 }} placeholder="név" value={contact} onChange={e => setContact(e.target.value)} />
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div style={{ display: "flex", gap: 10 }}>
                 <div style={{ flex: 1 }}>
@@ -1931,21 +2128,25 @@ function InviteModal({ session, projectId, onClose, onSubmit }) {
                 </div>
               </div>
 
-              <label style={S.miniLabel}>Ki fizeti a hozzáférést?</label>
-              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                <button onClick={() => setPayer(PAYER.TRADE)}
-                  style={{ ...S.payerBtn, ...(payer === PAYER.TRADE ? S.payerBtnOn : {}) }}>
-                  Az alvállalkozó
-                </button>
-                <button onClick={() => setPayer(PAYER.GC)}
-                  style={{ ...S.payerBtn, ...(payer === PAYER.GC ? S.payerBtnOn : {}) }}>
-                  Én (GC)
-                </button>
-              </div>
+              {inviteType === "TRADE" && (
+                <>
+                  <label style={S.miniLabel}>Ki fizeti a hozzáférést?</label>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                    <button onClick={() => setPayer(PAYER.TRADE)}
+                      style={{ ...S.payerBtn, ...(payer === PAYER.TRADE ? S.payerBtnOn : {}) }}>
+                      Az alvállalkozó
+                    </button>
+                    <button onClick={() => setPayer(PAYER.GC)}
+                      style={{ ...S.payerBtn, ...(payer === PAYER.GC ? S.payerBtnOn : {}) }}>
+                      Én (GC)
+                    </button>
+                  </div>
+                </>
+              )}
 
               {submitError && <div style={S.errorBox}><AlertTriangle size={15} /> <span>{submitError}</span></div>}
               <button onClick={submit} disabled={sending} style={{ ...S.primaryBtn, marginTop: 8, opacity: sending ? 0.7 : 1 }}>
-                <Users size={16} /> {sending ? "Küldés…" : "Meghívás elküldése"}
+                <Users size={16} /> {sending ? "Küldés…" : (inviteType === "EV" ? "Építésvezető hozzáadása" : "Meghívás elküldése")}
               </button>
             </>
           )}
