@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   Lock, ShieldCheck, Users, FolderKanban, Plus, Ban, CheckCircle2,
   LogOut, MapPin, MessageSquare, Eye, EyeOff, Crown, HardHat,
@@ -140,6 +140,8 @@ const api = {
     if (!res.ok || data.ok === false) throw new Error(data.error || "A kép feltöltése sikertelen.");
     return data.url;
   },
+
+  createFloorplan: (projectId, data) => apiCall(`/api/projects/${projectId}/floorplans`, { method: "POST", body: JSON.stringify(data) }),
 };
 
 
@@ -1145,6 +1147,34 @@ function ProjectView({ session, logout }) {
     setUsers(res.users);
   };
 
+  // ── Alaprajz feltöltése ────────────────────────────────────────────
+  const [uploadingFp, setUploadingFp] = useState(false);
+  const [fpError, setFpError] = useState("");
+  const fpInputRef = useRef(null);
+
+  const onFloorplanFileChosen = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFpError("");
+    setUploadingFp(true);
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const url = await api.uploadImage(dataUrl);
+      await api.createFloorplan(session.projectId, { name: file.name, imageUrl: url });
+      await reload();
+    } catch (err) {
+      setFpError(err.message);
+    } finally {
+      setUploadingFp(false);
+      if (fpInputRef.current) fpInputRef.current.value = "";
+    }
+  };
+
   useEffect(() => {
     Promise.all([
       api.getProject(session.projectId),
@@ -1194,6 +1224,7 @@ function ProjectView({ session, logout }) {
   const [selected, setSelected] = useState(null);
   const [modalTicket, setModalTicket] = useState(null); // felugró ablakban megnyitott hibajegy
   const [showInvite, setShowInvite] = useState(false);  // alvállalkozó-meghívó űrlap
+  const [showMembers, setShowMembers] = useState(false); // résztvevők listája
   const [cleaning, setCleaning] = useState(false);      // takarítás-kérés mód
   const [placing, setPlacing] = useState(false);     // "lehelyezés" mód aktív?
   const [draft, setDraft] = useState(null);           // {x,y} a frissen kattintott pont
@@ -1456,6 +1487,9 @@ function ProjectView({ session, logout }) {
               <code style={{ color: "#e6b450", fontSize: 13 }}>{project?.code}</code>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <button onClick={() => setShowMembers(true)} style={S.placeToggle}>
+                <Users size={15} /> Résztvevők ({users.length})
+              </button>
               {isGC && (
                 <button onClick={() => setShowInvite(true)} style={S.placeToggle}>
                   <Users size={15} /> Alvállalkozó meghívása
@@ -1471,6 +1505,14 @@ function ProjectView({ session, logout }) {
                   style={{ ...S.placeToggle, ...(cleaning ? { background: "#69db7c", color: "#0a0e14", border: "1px solid transparent" } : {}) }}>
                   {cleaning ? <><X size={15} /> Takarítás mód vége</> : <><Sparkles size={15} /> Takarítást kérek</>}
                 </button>
+              )}
+              {canEdit && (
+                <>
+                  <input ref={fpInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFloorplanFileChosen} />
+                  <button onClick={() => fpInputRef.current?.click()} disabled={uploadingFp} style={{ ...S.placeToggle, opacity: uploadingFp ? 0.6 : 1 }}>
+                    <ImageIcon size={15} /> {uploadingFp ? "Feltöltés…" : (floorplans.length ? "Alaprajz csere" : "Alaprajz feltöltése")}
+                  </button>
+                </>
               )}
               {canEdit && (
                 <button
@@ -1522,6 +1564,11 @@ function ProjectView({ session, logout }) {
           {cleaning && (
             <div style={{ ...S.placingHint, background: "#0f2417", border: "1px solid #69db7c40", color: "#69db7c" }}>
               <Sparkles size={14} /> Jelöld meg az alaprajzon, hová kérsz takarítást.
+            </div>
+          )}
+          {fpError && (
+            <div style={{ ...S.placingHint, background: "#2a1414", border: "1px solid #f0625540", color: "#f06255" }}>
+              <AlertTriangle size={14} /> {fpError}
             </div>
           )}
 
@@ -1741,6 +1788,46 @@ function ProjectView({ session, logout }) {
           }}
         />
       )}
+
+      {showMembers && (
+        <MembersModal users={users} onClose={() => setShowMembers(false)} />
+      )}
+    </div>
+  );
+}
+
+// Résztvevők listája — kik vannak hozzáadva a projekthez (név, telefon).
+function MembersModal({ users, onClose }) {
+  return (
+    <div style={S.modalOverlay} onClick={onClose}>
+      <div style={{ ...S.modal, maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+        <div style={S.modalHead}>
+          <div style={{ fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+            <Users size={18} /> Résztvevők ({users.length})
+          </div>
+          <button onClick={onClose} style={S.modalClose}><X size={18} /></button>
+        </div>
+        <div style={S.modalBody}>
+          {users.length === 0 ? (
+            <div style={{ color: "#5a6472", fontSize: 13.5, textAlign: "center", padding: "20px 0" }}>
+              Még nincs hozzáadva senki ehhez a projekthez.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {users.map((u, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#161c27", borderRadius: 8 }}>
+                  <span style={{ fontWeight: 600, fontSize: 13.5 }}>{u.name}</span>
+                  {u.phone && (
+                    <a href={`tel:${u.phone}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "#4dabf7", fontSize: 12.5, textDecoration: "none" }}>
+                      <Phone size={13} /> {u.phone}
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
