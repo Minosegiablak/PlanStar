@@ -1627,7 +1627,7 @@ function ProjectView({ session, logout }) {
               </button>
               {isGC && (
                 <button onClick={() => setShowInvite(true)} style={S.placeToggle}>
-                  <Users size={15} /> Alvállalkozó meghívása
+                  <Users size={15} /> Meghívás (alvállalkozó / EV)
                 </button>
               )}
               {isGC && (
@@ -1917,6 +1917,7 @@ function ProjectView({ session, logout }) {
         <InviteModal
           session={session}
           projectId={session.projectId}
+          projectName={project?.name}
           onClose={() => setShowInvite(false)}
           onSubmit={(newRequest) => {
             setAccessRequests(rs => [...rs, newRequest]);
@@ -1969,7 +1970,7 @@ function MembersModal({ users, onClose }) {
 }
 
 /* Alvállalkozó-meghívó űrlap (GC tölti ki) — cégadatok + ki fizet */
-function InviteModal({ session, projectId, onClose, onSubmit }) {
+function InviteModal({ session, projectId, projectName, onClose, onSubmit }) {
   const [inviteType, setInviteType] = useState("TRADE"); // "TRADE" | "EV"
   const [trade, setTrade] = useState(TRADES[0]);
   const [name, setName] = useState("");
@@ -1981,6 +1982,7 @@ function InviteModal({ session, projectId, onClose, onSubmit }) {
   const [payer, setPayer] = useState(PAYER.TRADE);
   const [sent, setSent] = useState(false);
   const [evResult, setEvResult] = useState(null); // { pin, code } EV-meghívás után
+  const [copiedEv, setCopiedEv] = useState(false);
   const [sending, setSending] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
@@ -1997,7 +1999,7 @@ function InviteModal({ session, projectId, onClose, onSubmit }) {
     try {
       if (inviteType === "EV") {
         const res = await api.inviteEv(projectId, {
-          name: name.trim(), phone: phone.trim(), email: email.trim(),
+          name: name.trim(), phone: phone.trim(),
         });
         setEvResult(res.user || res);
         setSent(true);
@@ -2029,8 +2031,8 @@ function InviteModal({ session, projectId, onClose, onSubmit }) {
             </div>
             <div style={{ fontSize: 12.5, color: "#8893a3", marginTop: 4 }}>
               {inviteType === "EV"
-                ? `${projectId} projekthez · azonnal létrejön, nincs admin-jóváhagyás`
-                : `${projectId} projekthez · a kérés az adminhoz kerül jóváhagyásra`}
+                ? `${projectName || projectId} projekthez · azonnal létrejön, nincs admin-jóváhagyás`
+                : `${projectName || projectId} projekthez · a kérés az adminhoz kerül jóváhagyásra`}
             </div>
           </div>
           <button onClick={onClose} style={S.modalClose}><X size={18} /></button>
@@ -2058,6 +2060,31 @@ function InviteModal({ session, projectId, onClose, onSubmit }) {
                         <div style={{ fontSize: 11, color: "#8893a3", textTransform: "uppercase", letterSpacing: ".3px" }}>PIN</div>
                         <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "monospace", color: "#3bc9db" }}>{evResult.pin}</div>
                       </div>
+                    )}
+                  </div>
+                )}
+                {evResult && (evResult.code || evResult.pin) && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                    <button
+                      onClick={() => {
+                        const text = `PlanStar belépés\nKód: ${evResult.code || ""}\nPIN: ${evResult.pin || ""}\nhttps://plan-star.vercel.app`;
+                        navigator.clipboard?.writeText(text);
+                        setCopiedEv(true);
+                        setTimeout(() => setCopiedEv(false), 2000);
+                      }}
+                      style={{ ...S.payerBtn, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                    >
+                      <Copy size={14} /> {copiedEv ? "Másolva!" : "Másolás"}
+                    </button>
+                    {phone.trim() && (
+                      <a
+                        href={`sms:${phone.trim()}?body=${encodeURIComponent(
+                          `PlanStar belépés\nKód: ${evResult.code || ""}\nPIN: ${evResult.pin || ""}\nhttps://plan-star.vercel.app`
+                        )}`}
+                        style={{ ...S.payerBtn, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, textDecoration: "none" }}
+                      >
+                        <Phone size={14} /> SMS küldése
+                      </a>
                     )}
                   </div>
                 )}
@@ -2122,10 +2149,12 @@ function InviteModal({ session, projectId, onClose, onSubmit }) {
                   <label style={S.miniLabel}>Telefon</label>
                   <input style={{ ...S.input, marginBottom: 12 }} placeholder="+36 ..." value={phone} onChange={e => setPhone(e.target.value)} />
                 </div>
-                <div style={{ flex: 1 }}>
-                  <label style={S.miniLabel}>E-mail</label>
-                  <input style={{ ...S.input, marginBottom: 12 }} placeholder="@" value={email} onChange={e => setEmail(e.target.value)} />
-                </div>
+                {inviteType === "TRADE" && (
+                  <div style={{ flex: 1 }}>
+                    <label style={S.miniLabel}>E-mail</label>
+                    <input style={{ ...S.input, marginBottom: 12 }} placeholder="@" value={email} onChange={e => setEmail(e.target.value)} />
+                  </div>
+                )}
               </div>
 
               {inviteType === "TRADE" && (
